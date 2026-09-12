@@ -1,0 +1,16 @@
+[project]
+name = "rubiks-adi"
+version = "0.1.0"
+description = "Curriculum-trained network with an exact corner heuristic for the Rubik's Cube"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["rubiks"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,4 @@
+numpy
+pytest
+# torch: install separately with the CUDA-matched command from
+# https://pytorch.org/get-started/locally/ (pick your CUDA version there)
