@@ -1,46 +1,32 @@
 """Tests for the corner pattern database.
 
-The full database takes minutes to build, so these tests build a truncated
-one (BFS stopped early) and check the properties that matter. A truncated
-database still has exact distances for every state it did reach.
+The full database takes minutes to build, so these tests use the truncated
+`shallow_db` fixture from conftest.py. A truncated database still has exact
+distances for every state it did reach.
 """
 
 import numpy as np
-import pytest
 
 from rubiks.corners import (
     NUM_CORNER_STATES,
     NUM_ORIENTATIONS,
     build_move_tables,
     encode,
+    encode_batch,
     extract,
 )
 from rubiks.cube import ALL_MOVES, apply_move, apply_sequence, solved_state
-from rubiks.pattern_db import UNVISITED, _apply_move_to_indices
+from rubiks.encoding import extract_corners
+from rubiks.pattern_db import UNVISITED, _apply_move_to_indices, lookup, lookup_batch
 
 
-@pytest.fixture(scope="module")
-def shallow_db():
-    """Distances for every corner state within 5 moves of solved."""
-    permutation_table, orientation_table = build_move_tables()
-    distances = np.full(NUM_CORNER_STATES, UNVISITED, dtype=np.uint8)
-    solved = encode(np.arange(8), np.zeros(8, dtype=np.int8))
-    distances[solved] = 0
-    frontier = np.array([solved], dtype=np.int32)
-
-    for depth in range(1, 6):
-        discovered = []
-        for move_index in range(len(ALL_MOVES)):
-            candidates = _apply_move_to_indices(
-                frontier, move_index, permutation_table, orientation_table
-            )
-            fresh = np.unique(candidates[distances[candidates] == UNVISITED])
-            if fresh.size:
-                distances[fresh] = depth
-                discovered.append(fresh)
-        frontier = np.concatenate(discovered)
-
-    return distances
+def random_states(rng, count, max_length):
+    states = []
+    for _ in range(count):
+        length = int(rng.integers(1, max_length + 1))
+        scramble = [ALL_MOVES[rng.integers(len(ALL_MOVES))] for _ in range(length)]
+        states.append(apply_sequence(solved_state(), scramble))
+    return np.stack(states)
 
 
 def test_solved_state_has_distance_zero(shallow_db):
@@ -115,3 +101,30 @@ def test_index_arithmetic_stays_in_range():
         assert moved.min() >= 0
         assert moved.max() < NUM_CORNER_STATES
         assert (moved % NUM_ORIENTATIONS < NUM_ORIENTATIONS).all()
+
+
+def test_batch_encoding_matches_scalar_encoding():
+    """The vectorized rank must agree with the validated scalar one, row by row."""
+    rng = np.random.default_rng(4)
+    states = random_states(rng, 300, max_length=25)
+    expected = np.array([encode(*extract(state)) for state in states])
+    assert np.array_equal(encode_batch(*extract_corners(states)), expected)
+
+
+def test_batch_encoding_covers_extreme_ranks():
+    identity = np.arange(8)[None, :]
+    reversed_order = np.arange(7, -1, -1)[None, :]
+    all_twisted = np.array([[2, 2, 2, 2, 2, 2, 2, 1]])
+    untwisted = np.zeros((1, 8), dtype=np.int64)
+    assert encode_batch(identity, untwisted).tolist() == [0]
+    assert encode_batch(reversed_order, all_twisted).tolist() == [
+        encode(reversed_order[0], all_twisted[0])
+    ]
+    assert encode_batch(reversed_order, all_twisted)[0] == NUM_CORNER_STATES - 1
+
+
+def test_lookup_batch_matches_scalar_lookup(shallow_db):
+    rng = np.random.default_rng(5)
+    states = random_states(rng, 300, max_length=5)
+    expected = np.array([lookup(shallow_db, state) for state in states])
+    assert np.array_equal(lookup_batch(shallow_db, states), expected)

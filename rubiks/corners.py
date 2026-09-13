@@ -165,6 +165,26 @@ def encode(permutation, orientation) -> int:
     )
 
 
+_PERMUTATION_WEIGHTS = np.array(
+    [factorial(NUM_CORNERS - 1 - i) for i in range(NUM_CORNERS - 1)], dtype=np.int64
+)
+_ORIENTATION_WEIGHTS = 3 ** np.arange(NUM_CORNERS - 2, -1, -1, dtype=np.int64)
+_LATER_SLOT = np.triu(np.ones((NUM_CORNERS, NUM_CORNERS), dtype=bool), k=1)
+
+
+def encode_batch(permutations: np.ndarray, orientations: np.ndarray) -> np.ndarray:
+    """Vectorized `encode` over rows: (batch, 8) arrays -> (batch,) indices."""
+    values = permutations.astype(np.int64)
+    # [row, i, j] is True when slot j comes after slot i and holds a smaller cubelet.
+    smaller_later = (values[:, None, :] < values[:, :, None]) & _LATER_SLOT
+    lehmer = smaller_later.sum(axis=2)[:, : NUM_CORNERS - 1]
+    permutation_ranks = lehmer @ _PERMUTATION_WEIGHTS
+    orientation_ranks = (
+        orientations[:, : NUM_CORNERS - 1].astype(np.int64) @ _ORIENTATION_WEIGHTS
+    )
+    return permutation_ranks * NUM_ORIENTATIONS + orientation_ranks
+
+
 def decode(index: int) -> tuple[np.ndarray, np.ndarray]:
     perm_rank, ori_rank = divmod(index, NUM_ORIENTATIONS)
     return permutation_unrank(perm_rank), orientation_unrank(ori_rank)

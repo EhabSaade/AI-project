@@ -26,9 +26,11 @@ from rubiks.corners import (
     NUM_ORIENTATIONS,
     build_move_tables,
     encode,
+    encode_batch,
     extract,
 )
 from rubiks.cube import ALL_MOVES
+from rubiks.encoding import extract_corners
 
 UNVISITED = 255
 
@@ -83,3 +85,8 @@ def build(progress=None) -> tuple[np.ndarray, list[int]]:
 def lookup(distances: np.ndarray, state: np.ndarray) -> int:
     """Corner distance for a full 54-sticker cube state."""
     return int(distances[encode(*extract(state))])
+
+
+def lookup_batch(distances: np.ndarray, states: np.ndarray) -> np.ndarray:
+    """Corner distances for a (batch, 54) array of cube states, fully vectorized."""
+    return distances[encode_batch(*extract_corners(states))]

@@ -42,7 +42,10 @@ def is_solved_batch(states: np.ndarray) -> np.ndarray:
 
 
 def generate_scrambles(
-    sequences: int, max_depth: int, rng: np.random.Generator
+    sequences: int,
+    max_depth: int,
+    rng: np.random.Generator,
+    prefix_sharing: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Scramble outward from solved, keeping every intermediate state.
 
@@ -50,12 +53,23 @@ def generate_scrambles(
     intermediate states is the point: it yields a spread of difficulties in
     one pass, with the shallow end supplying states near enough to the goal
     to be labelled from the reward rather than from a guess.
+
+    `prefix_sharing` is the probability, at each step, that a sequence drops
+    its own history and continues from another sequence's current state, so
+    that sequences share prefixes and the batch contains repeated states. At 0
+    this is exactly independent scrambling, drawing the same random numbers as
+    before the option existed. Each depth contributes `sequences` states either
+    way.
     """
     states = np.tile(solved_state(), (sequences, 1))
     all_states = np.empty((sequences * max_depth, 54), dtype=np.int8)
     all_depths = np.empty(sequences * max_depth, dtype=np.int64)
 
     for depth in range(max_depth):
+        if prefix_sharing > 0:
+            forked = rng.random(sequences) < prefix_sharing
+            donors = rng.integers(sequences, size=int(forked.sum()))
+            states[forked] = states[donors]
         moves = rng.integers(len(ALL_MOVES), size=sequences)
         states = np.take_along_axis(states, MOVE_PERMUTATIONS[moves], axis=1)
         start = depth * sequences

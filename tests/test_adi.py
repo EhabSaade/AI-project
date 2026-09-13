@@ -135,3 +135,49 @@ def test_training_reduces_loss_on_a_fixed_shallow_batch():
     for _ in range(30):
         stats = adi.train_step(model, optimizer, states, depths, device)
     assert stats["loss"] < first
+
+
+def independent_reference(sequences, max_depth, rng):
+    """The scramble generator as it was before prefix sharing existed."""
+    states = np.tile(solved_state(), (sequences, 1))
+    levels = []
+    for _ in range(max_depth):
+        moves = rng.integers(len(ALL_MOVES), size=sequences)
+        states = np.take_along_axis(states, adi.MOVE_PERMUTATIONS[moves], axis=1)
+        levels.append(states)
+    return np.concatenate(levels)
+
+
+def test_zero_prefix_sharing_is_exactly_independent_scrambling():
+    """The network was trained without sharing; adding the option must not change that."""
+    generated, _ = adi.generate_scrambles(64, 12, np.random.default_rng(9), prefix_sharing=0.0)
+    reference = independent_reference(64, 12, np.random.default_rng(9))
+    assert np.array_equal(generated, reference)
+
+
+def test_prefix_sharing_keeps_the_depth_distribution():
+    _, depths = adi.generate_scrambles(32, 6, np.random.default_rng(10), prefix_sharing=0.7)
+    assert np.array_equal(np.bincount(depths)[1:], np.full(6, 32))
+
+
+def test_shared_prefix_states_still_grow_one_move_at_a_time():
+    """Every state is one move from some state at the previous depth in the batch."""
+    sequences, max_depth = 16, 5
+    states, depths = adi.generate_scrambles(
+        sequences, max_depth, np.random.default_rng(11), prefix_sharing=0.8
+    )
+    for depth in range(2, max_depth + 1):
+        previous = {state.tobytes() for state in states[depths == depth - 1]}
+        for state in states[depths == depth]:
+            neighbours = adi.children_of(state[None, :])[0]
+            assert any(n.tobytes() in previous for n in neighbours)
+
+
+def test_prefix_sharing_produces_repeated_states():
+    def distinct_at_depth_12(prefix_sharing):
+        states, depths = adi.generate_scrambles(
+            256, 12, np.random.default_rng(12), prefix_sharing
+        )
+        return len({state.tobytes() for state in states[depths == 12]})
+
+    assert distinct_at_depth_12(0.9) < distinct_at_depth_12(0.0)
