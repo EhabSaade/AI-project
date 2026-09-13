@@ -222,6 +222,31 @@ def test_hybrid_prunes_the_branch_the_policy_wrongly_prefers():
         assert is_solved(apply_sequence(state, path))
 
 
+def test_hybrid_is_the_first_single_pass_that_succeeds():
+    """The pass-by-pass analysis rests on this: the hybrid is nothing more than
+    independent pruned beam searches tried in order of increasing bound."""
+    rng = np.random.default_rng(13)
+    for width in (1, 2):
+        for depth in range(2, 7):
+            moves, state = scrambled(rng, depth)
+            policy = path_oracle(moves, distractor=True)
+            exact = path_heuristic(moves)
+
+            def loose(states):
+                # Underestimates by two on the path, so the first passes fail.
+                return np.maximum(exact(states) - 2, 0)
+
+            start = max(int(loose(state[None, :])[0]), 1)
+            first_success = None
+            for bound in range(start, 16):
+                path = beam_search(policy, state, width, bound, loose, bound)
+                if path is not None:
+                    first_success = path
+                    break
+
+            assert hybrid_search(policy, loose, state, width, budget=15) == first_success
+
+
 def test_hybrid_on_a_solved_cube_returns_an_empty_path():
     assert hybrid_search(uniform_policy, zero_heuristic, solved_state(), width=2, budget=5) == []
 

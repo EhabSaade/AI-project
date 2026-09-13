@@ -1,11 +1,114 @@
-# Running Findings Log
+# Findings
 
-Working notes recorded as each step completes, to be drawn on when writing
-the final report. Each entry records what was built, what was measured, and
-what it implies for later steps. Failures and surprises are recorded too --
-they are often the most useful material for the report.
+## How to read this file
+
+- **It is a chronological log.** Each step records what was built, what was
+  measured and what it implied, including failures and wrong predictions.
+- **Superseded results are kept as a record but marked.** A section that opens
+  with a *Superseded* note contains numbers that must not be quoted; the note says
+  where the final numbers are.
+- **Final results live in:** Finding 3c (engine validation), 4c (pattern database),
+  T1 final (training length), 6b-ii (beam search), 7c and 7d (IDA\* and scramble
+  depth), 8a-8d (the main question), 8e (why the database helps), C1-C3 (cache study).
+- **All final solver results share one setup:** the final 60k-iteration network;
+  50 cubes per depth at depths 1-20 and 50 (1,050 cubes); identical cubes for every
+  solver; a 30-move budget. `notebooks/02_comparison.ipynb` reprints every table.
 
 ---
+
+## Final results at a glance
+
+### The main question: does the pattern database help the learned solver?
+
+Paired on the same 1,050 cubes, with exact McNemar tests on the cubes only one
+solver finished:
+
+| Comparison | Cubes only the first solved | Cubes only the second solved | p | Time (sum of per-cube means) |
+|---|---|---|---|---|
+| Same width 100: hybrid vs beam search | **38** | 0 | 7 x 10^-12 | 4.78 s vs 0.39 s |
+| Same width 1000: hybrid vs beam search | **91** | 0 | 8 x 10^-28 | 33.5 s vs 2.6 s |
+| Similar time: beam width 1000 vs hybrid width 100 | **40** | 10 | 2.4 x 10^-5 | 2.6 s vs 4.8 s |
+| Similar time: beam width 10,000 vs hybrid width 1000 | **64** | 21 | 3.3 x 10^-6 | 25.1 s vs 33.5 s |
+
+Cubes solved at depths 11-20 (500 cubes each) against mean time per cube:
+
+| Solver | Greedy | Beam 100 | Beam 1000 | Beam 10,000 | Hybrid 100 | Hybrid 1000 | IDA\* |
+|---|---|---|---|---|---|---|---|
+| Cubes solved | 19.0% | 50.8% | 63.6% | **85.8%** | 58.0% | 79.8% | 38.8% |
+| Mean time per cube | 0.4 ms | 29 ms | 204 ms | 1,899 ms | 394 ms | 2,598 ms | 6,961 ms |
+
+**Answer:**
+
+1. **At the same search width, the pattern database significantly improves the
+   learned solver**, and never produced a longer solution.
+2. **For the same time, a wider beam does better, at both budgets tested**, using less
+   total time and giving slightly shorter solutions.
+3. **Most of the gain comes from repeated attempts, not from pruning.** About 70% of
+   the hybrid's gain at width 100 needs its many differently-pruned passes -- a median
+   of 23 per hard cube -- which is also what makes it expensive. A genuine but smaller
+   pruning effect accounts for the rest; a one-pass hybrid keeps only about 30% of the
+   gain (Finding 8e).
+4. **This is a conclusion about this hybrid, not about pattern databases in
+   general.** Its cost comes mostly from restarting its search after each failed pass,
+   and its database covers corners only.
+
+### Other results
+
+- **The cube engine is externally validated:** it reproduces the published pocket-cube
+  state count (3,674,160), God's number (11) and full distance distribution
+  (Finding 3c). The corner database reaches all 88,179,840 states (Finding 4c).
+- **Training stopped improving by about 40k iterations** (mean solve rate at depths
+  8-15: 41% at 20k, 50% at 40k, 50% at 60k), while the loss curve looked flat
+  throughout and would not have shown either the gain or its end (Finding T1).
+- **Scramble depth overstates distance:** among cubes IDA\* finished, a 12-move random
+  scramble is a median of 9 moves from solved (Finding 7d).
+- **Twenty random moves do not produce a random cube:** corners become
+  indistinguishable from random only from about 40 moves (Finding 7c).
+- **IDA\* with the corner database** (200,000-node limit) finishes 98% of cubes at
+  depth 10, 6% at depth 20 and none at depth 50; its effort grows about 3.9x per extra
+  move of optimal length over lengths 4-9 (Finding 7d).
+- **Where IDA\* could verify optimality, solutions were almost always optimal:** greedy
+  97%, beam 100 98%, beam 1000 99%, beam 10,000 100% after rounding, hybrid 100 99%,
+  hybrid 1000 100% (693 of 693) (Findings 6b-ii, 8c, 8d).
+- **Caching:** with ordinary independent scrambles, 35.9% of the positions evaluated
+  per training batch are duplicates; correlated scrambles add only 3 more points
+  (Findings C1-C2).
+
+### Limitations that apply to the results above
+
+1. **The mechanism was analysed at width 100 only, and after the main results were
+   in** (Finding 8e). Its pruning effect rests on 11 cubes: the direction is clear (11
+   gained, 0 lost), the size is not.
+2. **One trained network.** Every solver used the same 60k-iteration network, trained
+   only on scrambles of up to 12 moves. A stronger network could shift the balance
+   between beam search and the hybrid.
+3. **Timings depend on implementation.** IDA\* is single-threaded Python on the CPU;
+   beam search and the hybrid evaluate the network in batches on the GPU. Comparisons
+   between IDA\*'s times and the others' reflect implementation as much as algorithm.
+   Some timing runs overlapped other work on the same laptop.
+4. **50 cubes per depth.** The pooled paired tests are strong; differences of a few
+   points at a single depth are one or two cubes and should be read as noise.
+5. **Choices made after seeing the data** are declared where they occur: the depth
+   bands 8-15 and 11-20, and beam search at width 10,000.
+6. **A corners-only pattern database**, the weakest standard choice.
+
+### Not done
+
+- **A larger-sample rerun of the evaluation** was planned (Step 6a) but not done;
+  everything stayed at 50 cubes per depth.
+- **The GPU-side saving of the within-iteration cache** was not measured, and its CPU
+  timings were not rechecked on an idle machine (Finding C3).
+- **Reporting against true distance** was only partly done: optimality gaps use IDA\*'s
+  optimal lengths, but cubes IDA\* did not finish have unknown distances, so solve rates
+  are still reported by scramble depth.
+- **Whether correlated scrambles change learning quality** was not measured; it needs
+  paired training runs (Scope decisions).
+- **The 2x2x2 network validation** promised in the proposal was replaced by checks
+  against IDA\* on the 3x3x3 cubes (Scope decisions).
+
+---
+
+# Detailed log
 
 ## Step 1: Cube engine (3x3x3)
 
@@ -334,7 +437,7 @@ the *core*, and added notebooks alongside it instead:
 
 | Layer | Location | Reason |
 |---|---|---|
-| Engine, coordinates, PDB, encoding, ADI | `rubiks/` | needs the test suite; it has caught five real bugs so far |
+| Engine, coordinates, PDB, encoding, ADI | `rubiks/` | needs the test suite, which caught two code bugs before anything was built on them (Finding 4a) |
 | Long jobs (PDB build, training) | `scripts/` | run for minutes to hours; must survive kernel restarts |
 | Plots, tables, model inspection, report figures | `notebooks/` | genuinely better suited |
 
@@ -348,11 +451,12 @@ simply imports it. The package is now also pip-installable (`pip install -e
 .`), which permanently fixes the import errors hit earlier when running files
 directly.
 
-### Finding 5e: the completed training run
+### Finding 5e: the first training run (20k iterations)
 
 20,000 iterations, 3,072 states each, max scramble depth 12, in 2h 2m on one
 RTX 3060 Laptop GPU. Loss fell from 0.997 to 0.088; policy/value agreement
-rose from 0.063 (chance for 18 moves is 0.056) to 0.803.
+rose from 0.063 (chance for 18 moves is 0.056) to 0.803. Training was later
+extended to 60k iterations (see *Training continuation* and Finding T1).
 
 Training never diverged or collapsed, which was the main risk identified for
 this step -- McAleer et al. report ADI doing exactly that without 1/depth
@@ -368,6 +472,13 @@ indicator, and should be described that way rather than as a solve rate.
 ---
 
 ## Step 6a: Ground-truth evaluation of the greedy policy
+
+> **Superseded.** This first greedy evaluation used the 20k network and a cube set
+> generated before per-depth seeding, so its numbers are not comparable with the
+> final results and must not be quoted. Final greedy numbers: Finding 6b-ii (final
+> 60k network) and Finding T1 final (every snapshot, identical cubes). Its
+> qualitative conclusions -- optimal paths at shallow depths, and solve rate falling
+> with depth -- still hold.
 
 **Built:** `scripts/evaluate_greedy.py`, since folded into
 `scripts/evaluate.py --solver greedy`. Follows the network's top move
@@ -424,8 +535,9 @@ against it.
   distance. A reduction is evidence of progress; the absence of one is not
   proof of a mistake. It tracks solve rate closely here (100% down to 38%),
   which is a useful consistency check between two independent measures.
-- **50 cubes per depth** is a small sample; the final report should rerun
-  this at a larger sample size once the fast vectorised lookup exists.
+- **50 cubes per depth** is a small sample. A rerun at a larger sample size was
+  planned here but **not done**: the final evaluation also uses 50 cubes per depth,
+  and relies on paired tests pooled across all depths instead.
 
 ---
 
@@ -454,36 +566,21 @@ at iteration 20k (a failed weight load would restart near 1.0), and the
 printed settings were the checkpoint's `sequences=256, max_depth=12` rather
 than the command-line defaults of 128 and 8.
 
-**Bonus for the report:** the 10k snapshots allow a solve-rate-versus-training
--length figure (20k, 30k, ... 60k) using the same evaluation script and cubes.
+### Finding T1 (interim)
 
-### Finding T1 (preliminary, pending 60k): longer training improves real solving, not just loss
+> **Superseded by Finding T1 (final) below**, which includes these 20k and 40k
+> numbers alongside 30k, 50k and 60k.
 
-Greedy solve rate on the identical 50 cubes per depth (seed 0), 20k versus 40k
-iterations:
+An interim comparison of the 20k and 40k snapshots showed gains of up to 12 points
+at depths 8-15, the 40k network never worse at any depth, and some cubes solved
+beyond the training depth (24-38% at depths 13-15). It also showed why the loss curve
+alone would have misled: loss moved only from about 0.088 to 0.08 over those 20k
+iterations, while solve rates at depths 9-15 rose by 4-12 points. The final
+comparison confirms the gains up to 40k and shows they stop there.
 
-| Scramble depth | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 20k | 96% | 98% | 80% | 72% | 48% | 38% | 30% | 26% | 22% | 14% | 8% | 2% | 4% | 2% | 0% |
-| 40k | 98% | 100% | 86% | 84% | 58% | 40% | 42% | 38% | 26% | 24% | 8% | 2% | 4% | 4% | 0% |
-
-Depths 1-5 were 100% for both.
-
-- **Gains concentrate at depths 8-15**, by up to 12 points. Shallow depths were
-  already saturated; depths 16 and beyond remain near zero for both.
-- **The 40k network is never worse at any depth.** With 50 cubes, a 2-point
-  difference is a single cube and could be noise, but the larger gains (depths 9,
-  10, 12, 13, 15) all point the same way, on paired cubes.
-- **The network solves some cubes beyond its training distribution:** 24-38% at
-  depths 13-15, although it was only trained on scrambles of at most 12 moves.
-
-This is also why the training-loss curve alone would have been misleading: loss
-moved only from about 0.088 to 0.08 over the same 20k iterations, which looks
-like a plateau, while the solve rate at depths 9-15 rose by 4-12 points.
-
-**Note on the Step 6a table:** those numbers used a different cube set (before
-per-depth seeding) and are not comparable with this one; for example depth 10
-read 62% there and 48% here for the same 20k network. This table supersedes it.
+**Note on the Step 6a table:** it used a different cube set (before per-depth
+seeding) and is not comparable with these results; for example depth 10 read 62%
+there and 48% here for the same 20k network.
 
 ### Finding T1 (final): the gains stop by about 40k iterations
 
@@ -511,9 +608,9 @@ Depths 1-5 are 100% at every checkpoint; the 60k network solves 0% at depth 50.
 | Gain over previous snapshot | - | +5.75 | +2.75 | +0.25 | +0.25 |
 | Mean solve rate, depths 1-20 | 52.0% | 54.7% | 55.7% | 56.5% | 56.0% |
 
-- **The preliminary conclusion holds only up to 40k.** From 20k to 40k the mean over
-  depths 8-15 rose 8.5 points; from 40k to 60k it rose 0.5, well within noise (each
-  band mean pools 400 cubes, a standard error of roughly 2.5 points).
+- **Gains stop by 40k.** From 20k to 40k the mean over depths 8-15 rose 8.5 points;
+  from 40k to 60k it rose 0.5, well within noise (each band mean pools 400 cubes, a
+  standard error of roughly 2.5 points).
 - **Between 40k and 60k the per-depth numbers move up and down by 2-8 points** (1-4
   cubes) with no consistent direction -- noise, not a trend.
 - **The band choice does not drive the result.** Depths 8-15 were picked, after
@@ -524,6 +621,9 @@ Depths 1-5 are 100% at every checkpoint; the 60k network solves 0% at depth 50.
   the maximum training scramble depth of 12 and the network's size.
 - The final comparison uses the 60k checkpoint as planned; because 40k-60k are
   indistinguishable, that choice does not affect its conclusions.
+
+**Figure:** `figures/training_length.png` (mean solve rate at depths 8-15 against
+training iterations), generated by `notebooks/02_comparison.ipynb`.
 
 ---
 
@@ -595,7 +695,8 @@ per-node bottleneck for any search that consults the heuristic.
 ### Finding 6b-ii: beam search on the final network
 
 Final 60k checkpoint, the Step 8 protocol's 50 cubes per depth, budget 30 moves.
-Greedy and IDA\* (200,000-node limit) are on the identical cubes.
+Greedy and IDA\* (200,000-node limit) are on the identical cubes. Beam search at
+width 10,000 was added later; see Finding 8d.
 
 | Scramble depth | Greedy | Beam, width 100 | Beam, width 1000 | IDA\* |
 |---|---|---|---|---|
@@ -632,8 +733,10 @@ Time per cube:
   move is often ranked second or lower rather than first.
 - **Beam search overtakes IDA\* from about depth 11, far faster.** At depth 15, width
   100 solves 48% in 30 ms per cube against IDA\*'s 38% in 7.6 s -- roughly 250 times
-  faster. This holds for IDA\* at its 200,000-node limit with a corners-only database;
-  a larger budget or a stronger database would move it.
+  faster. That ratio reflects implementation as much as algorithm: IDA\* is
+  single-threaded Python on the CPU, while beam search evaluates the network in
+  batches on the GPU. It also holds only for IDA\* at its 200,000-node limit with a
+  corners-only database; a larger budget or a stronger database would move it.
 - **On fully scrambled cubes (depth 50), only width 1000 solves any**: 3 of 50, with
   median solution length 27. That is longer than God's number of 20, so these
   solutions are clearly not optimal -- beam search trades solution quality for reach.
@@ -680,12 +783,13 @@ which children may be considered at all.
 
 - **With a heuristic that always returns 0, the hybrid is exactly beam
   search** (same width and budget). This is enforced by a test comparing the
-  returned paths, so any beam-versus-hybrid difference in the results can be
-  attributed to the pattern database alone.
-- **A test isolates the mechanism.** The misleading policy from Step 6b, which
-  defeats width-1 beam search on every scramble, is paired with a heuristic
-  that knows the true distance along the scramble. Width-1 hybrid then solves
-  every scramble in exactly its length: the heuristic rules out the move the
+  returned paths, so any beam-versus-hybrid difference in the results requires the
+  pattern database. (It does not show *which part* of the hybrid's use of the
+  database produces the difference; Finding 8e analyses that.)
+- **A test isolates the mechanism on a constructed policy.** The misleading policy
+  from Step 6b, which defeats width-1 beam search on every scramble, is paired with a
+  heuristic that knows the true distance along the scramble. Width-1 hybrid then
+  solves every scramble in exactly its length: the heuristic rules out the move the
   policy wrongly prefers, so the second-ranked (correct) move survives.
 - **The cost of multiple passes is not hidden:** time per cube covers all
   passes, so it is part of the comparison.
@@ -711,9 +815,11 @@ the heuristic is admissible, which Step 4 established.
 
 ### Finding 7a: IDA* is far stronger at these depths than predicted
 
-> **Superseded in part by Finding 7d.** This 5-cube probe showed 100% through
-> depth 12; the 50-cube evaluation shows misses from depth 10 onward. The
-> conclusion that scramble depth overstates distance still stands.
+> **Superseded in part by Finding 7d; do not quote this table.** This 5-cube probe
+> showed 100% through depth 12; the 50-cube evaluation shows misses from depth 10
+> onward, and different medians (for example a median optimal length of 7 at
+> depth 9, not 9). The conclusion that scramble depth overstates distance still
+> stands. Kept as a record of the probe.
 
 The prediction, going in, was that IDA* would become impractical by around
 scramble depth 12, based on Korf reporting days per cube for his optimal
@@ -737,11 +843,11 @@ solver.
 
 **The prediction was wrong, and the reason matters for the whole evaluation:
 scramble depth greatly overstates distance.** A 12-move random scramble is a
-median of only 8 moves from solved. Korf's figure is for fully random cubes,
-roughly 18 moves out, and search effort grows by roughly the branching factor
-(about 13 after move pruning) for every additional move of distance. At 8-9
-moves the corner database is an informative enough bound for search to finish
-in well under a second.
+median of only 8 moves from solved in this probe (9 in the 50-cube evaluation).
+Korf's figure is for fully random cubes, roughly 18 moves out, and search effort
+grows steeply with every additional move of distance. At 8-9 moves the corner
+database is an informative enough bound for search to finish in well under a
+second.
 
 **Consequences for Step 8:**
 
@@ -751,10 +857,10 @@ in well under a second.
    compared directly with the optimum on the same cube.
 2. **IDA* is not a slow straw man in this range**: it is fast, complete and
    optimal. Any case for the network has to be made on deeper cubes, where
-   IDA* stops finishing, or on speed. A deeper probe is running to locate that
-   point.
+   IDA* stops finishing, or on speed. A deeper probe (Finding 7b) was run to locate
+   that point.
 3. **The network was trained on scrambles of at most 12 moves**, which is only
-   about 8 moves of true distance. Evaluating on deeper cubes also tests
+   about 8-9 moves of true distance. Evaluating on deeper cubes also tests
    whether it generalises beyond the distances it was trained on.
 
 **Caveats:** 5 cubes per depth is a small sample; node counts are heavy-tailed
@@ -764,9 +870,10 @@ was sharing the CPU.
 
 ### Finding 7b: where IDA* breaks down
 
-> **Superseded in part by Finding 7d.** The 50-cube evaluation shows the breakdown
-> is gradual from depth 10, not a start at depth 13, and that search effort grows
-> about 3.9x per extra move over these distances, not about 13x.
+> **Superseded in part by Finding 7d; do not quote this table.** The 50-cube
+> evaluation shows the breakdown is gradual from depth 10, not a start at depth 13,
+> and that search effort grows about 3.9x per extra move over these distances, not
+> about 13x as estimated below. Kept as a record of the probe.
 
 A second probe extended the same settings to scramble depth 20.
 
@@ -812,7 +919,8 @@ God's number -- 20 moves in the face-turn metric -- bounds *distance*: no
 position is more than 20 moves from solved. It does not follow that a 20-move
 random scramble produces a typical position, because random moves cancel and
 repeat. Most positions of the cube lie around 17-18 moves from solved, while
-Finding 7a showed a 12-move scramble lands a median of only 8 away.
+Finding 7d shows a 12-move scramble lands a median of only 9 away among cubes IDA\*
+finished.
 
 To check how many random moves a scramble needs, corners were used as a
 measurable proxy. The corner database gives the exact distribution of corner
@@ -867,8 +975,8 @@ The final IDA* evaluation, run to the Step 8 protocol (50 cubes per depth,
 | 20 | 6% | 10 | 191,616 | 9,592.2 |
 | 50 | 0% | - | 200,001 | 9,787.6 |
 
-Times were measured while training shared the machine; solve rates, lengths and
-node counts are unaffected by that.
+Times were measured while training shared the machine, on a single-threaded Python
+implementation; solve rates, lengths and node counts are unaffected by either.
 
 **Three corrections:**
 
@@ -929,12 +1037,18 @@ The same care about sample size applies to the classical baseline as to the netw
   fit in roughly 1.5 hours for the full protocol, so no width had to be dropped.
   The 2-of-3 at depth 20 is anecdotal (IDA\* finishes 6% there) and is only a
   reason to look closely, not a result.
+
+  **Added after this protocol was fixed:** beam search at width 10,000, once the
+  width-1000 results left the equal-time question open at the higher budget
+  (Finding 8d). It was not part of the protocol as originally set.
 - **IDA\*:** 200,000 node limit (about 10 s per cube at the limit). It does not
   use the network, so it runs while training finishes; its times were measured
   with training sharing the machine, while its solve rates, node counts and
   optimal lengths are unaffected by that.
 - **Reporting:** results against IDA\*'s optimal length on the same cube wherever
-  IDA\* finished, not only against scramble depth.
+  IDA\* finished, not only against scramble depth. (In practice this was done for
+  solution length through the optimality gap; solve rates are still reported by
+  scramble depth, since unsolved cubes have unknown distance.)
 
 ---
 
@@ -974,9 +1088,16 @@ they differ; at depths 1-9 both solved every cube):
 - **Zero losses is a result, not a guarantee.** Pruning changes which children fill
   the beam, and the hybrid runs several passes under a changing bound, so it could in
   principle miss a solution beam search finds. It did not, on any of 1,050 cubes.
-- This is the comparison the whole design was built to make interpretable: a test
-  asserts the hybrid equals beam search when the heuristic knows nothing, so this
-  difference can be attributed to the pattern database alone.
+- **What this establishes, and what it does not.** A test asserts the hybrid equals
+  beam search when the heuristic knows nothing, so the gain disappears without the
+  database: it is caused by the database being present. It does *not* establish
+  *how*. The hybrid makes several passes, each pruned differently under a different
+  move bound, and uses about 12 times the compute of beam search at the same width
+  (Finding 8b). The gain could come from better pruning within a pass, or from
+  getting several differently-pruned attempts at the cube. The Step 7 test shows
+  pruning working on a constructed policy, not in these runs. **This was tested
+  afterwards in Finding 8e:** about 70% of the gain comes from the several attempts,
+  and the rest from a genuine pruning effect.
 
 ### Finding 8b: but at equal time, a wider beam does better
 
@@ -1020,8 +1141,9 @@ as much per cube as hybrid width 100 on deep cubes, and less overall (2.63 s aga
    cheaper, and the equal-time comparison could change with it.
 2. **The database covers corners only**, the weakest standard pattern database. An
    edge database would prune far more.
-3. **Two widths and 50 cubes per depth.** The paired tests are what make 50 cubes
-   enough to separate these solvers; they do not make the result general.
+3. **Few settings and 50 cubes per depth.** The hybrid was run at two widths and beam
+   search at three. The paired tests are what make 50 cubes enough to separate these
+   solvers; they do not make the result general.
 4. A few short notebook runs overlapped the hybrid's timing run. Their effect is small
    next to a twelve-fold difference, but the times are not from an idle machine.
 
@@ -1048,7 +1170,8 @@ both solved every cube):
 - **The hybrid solved 91 cubes that beam search did not, and beam search solved none
   that the hybrid did not** (exact McNemar p = 8 x 10^-28). The width-100 result
   (38 to 0) was not a fluke of one setting; the gain more than doubles at the wider
-  width.
+  width. Why the database helps was analysed at width 100 only (Finding 8e), so the
+  mechanism at width 1000 is untested.
 - **Again no solution got longer:** on the 821 cubes both solved, the hybrid's was
   shorter on 23 and longer on none (mean -0.13 moves).
 - **On fully scrambled cubes (depth 50) the hybrid solves 13 of 50 (26%)**, against 3
@@ -1126,8 +1249,60 @@ the data, as where the search solvers are not all at 100%.
   width 1000 over hybrid width 100 at roughly 0.2-0.4 s per cube, and width 10,000 over
   hybrid width 1000 at roughly 2-3 s.
 - **IDA\* with the corner database is out-reached by every search configuration from
-  beam width 100 upward**, at a small fraction of its time -- within the limits already
-  noted for its 200,000-node budget.
+  beam width 100 upward**, at a small fraction of its time. Two conditions bound this:
+  its 200,000-node budget, and its implementation -- single-threaded Python on the
+  CPU, against solvers that evaluate the network in batches on the GPU -- so its times
+  reflect implementation as much as algorithm.
+
+### Finding 8e: the gain is mostly several attempts, with a smaller pruning effect
+
+Added after Findings 8a-8d, to test the limitation stated in 8a: is the hybrid's
+gain better pruning within a pass, or several differently-pruned attempts?
+`scripts/hybrid_passes.py` ran every individual pass of the width-100 hybrid on all
+1,050 cubes. Each pass is one pruned beam search at one move bound, and a test asserts
+the hybrid is exactly the first pass that succeeds. **Rebuilding the hybrid from these
+passes reproduced its evaluated result on 1,050 of 1,050 cubes**, so the breakdown is
+faithful. `scripts/analyze_passes.py` then compared *one-pass hybrids* -- which commit
+to a single bound in advance -- with beam search and the full hybrid, on the same cubes.
+
+| Solver (width 100) | Cubes solved (of 1,050) | Gained vs beam | Lost vs beam | McNemar p | Mean ms per cube |
+|---|---|---|---|---|---|
+| Beam search (no database) | 753 | - | - | - | 18.5 |
+| Full hybrid, all passes | 791 | 38 | 0 | 7 x 10^-12 | 256.7 |
+| One pass, bound = the cube's lower bound | 355 | 1 | 399 | 3 x 10^-118 | 6.6 |
+| One pass, bound 20 | 750 | 4 | 7 | 0.55 | 21.0 |
+| One pass, bound 30 (the best single bound) | 764 | 11 | 0 | 9.8 x 10^-4 | 28.4 |
+
+A single pass does best with the loosest bound: solve counts rise steadily as the bound
+loosens, whether it is set relative to the cube's lower bound or fixed, and both
+versions peak at an effective bound of 30. No single bound comes close to the full
+hybrid.
+
+- **Several differently-pruned attempts account for most of the gain.** Of the 38
+  cubes the hybrid solves and beam search does not, the best one-pass hybrid solves 11
+  (29%). The other 27, about 70% of the gain, need a pass at some other bound.
+- **Those cubes are solved by only a few specific bounds.** Each was tried at a median
+  of 23 bounds and solved at a median of 2 (9% of those tried); 13 were solved by
+  exactly one bound. Pruning at a different bound sends the beam down a different path,
+  and trying many such paths is what finds these solutions -- closer to restarting with
+  variation than to a uniformly better search.
+- **There is also a real, smaller pruning effect.** Even the loosest pass, which only
+  discards children that cannot be finished within 30 moves, solves 11 cubes beam
+  search misses and loses none (p = 0.001), for about 1.5 times beam search's time. A
+  plausible mechanism is that late in the search it keeps hopeless positions out of the
+  beam; untested.
+- **A tight bound on its own is harmful.** A pass at the cube's lower bound solves only
+  355 cubes: the corners-only lower bound is usually well below the true distance, so
+  the pass prunes away every route to a solution. The hybrid only gets away with
+  starting there because it then loosens the bound, which costs time.
+- **This explains the equal-time results in Findings 8b-8d.** About 70% of the
+  hybrid's gain is bought by running many passes -- a median of 23 per hard cube --
+  which is also where its twelvefold cost comes from. A wider beam buys search variety
+  more cheaply.
+
+**Caveats:** width 100 only. The pass timings come from a later run than beam search's
+recorded times, on the same machine. Eleven cubes is a small count: the direction of the
+pruning effect is clear (11 gained, 0 lost), its size is not.
 
 **Taken together, the answer to the proposal's main question:**
 
@@ -1138,12 +1313,16 @@ the data, as where the search solvers are not all at 100%.
    10 and 64 to 21, both significant, each in less total time and with slightly shorter
    solutions). In this implementation, compute is better spent on search width than on
    the corner pattern database.
-3. **This is a conclusion about this hybrid, not about pattern databases in general.**
-   The hybrid's cost comes mostly from restarting its search under a longer bound after
-   each failed pass, and the database covers corners only. At width 1000 the hybrid took
-   only about a third more total time than the wider beam (33.5 s against 25.1 s), so a
-   cheaper hybrid or a stronger database is exactly what could change the answer -- the
-   natural future work.
+3. **Why: most of the gain comes from repeated attempts, not from pruning** (Finding
+   8e). About 70% of it needs the hybrid's many differently-pruned passes, which is what
+   makes it expensive; a genuine pruning effect accounts for the rest. A one-pass hybrid
+   is cheap but keeps only about 30% of the gain.
+4. **This is a conclusion about this hybrid, not about pattern databases in general.**
+   The database covers corners only, and the hybrid's way of using it -- restarting under
+   a longer bound after each failed pass -- is one design among many. A hybrid that kept
+   the variety of attempts at lower cost, or a stronger database that makes pruning itself
+   do more of the work, is exactly what could change the answer -- the natural future
+   work.
 
 ## Scope decisions against the proposal
 
@@ -1277,14 +1456,14 @@ One batch, on CPU while training was sharing the machine:
 | Encoding avoided by skipping them (35.7%) | 39.1 |
 
 A net saving of about 12 ms per iteration on encoding alone. The GPU
-forward-pass saving comes on top of that but could not be measured while
-training occupied the GPU.
+forward-pass saving would come on top of that; it could not be measured while
+training occupied the GPU, and **was not measured afterwards**.
 
 **Side finding for the compute-efficiency discussion:** encoding children on the
 CPU takes about 110 ms of a roughly 240 ms training iteration -- close to half.
 On this hardware the bottleneck of ADI training is CPU-side input encoding, not
-the GPU. Both figures were measured under contention and should be rechecked
-once training has finished.
+the GPU. Both figures were measured while training shared the machine and **were
+not rechecked** on an idle machine, so treat them as approximate.
 
 ### What this answers, and what it does not
 
@@ -1320,10 +1499,12 @@ network being evaluated was trained exactly as before.
 | 4. Corner pattern database (3x3x3) | Done, complete and validated |
 | 5. Encoding, network, ADI training loop | Done; trained to 60k iterations (Finding T1) |
 | 6a. Greedy baseline, measured against ground truth | Done on every 10k snapshot, 20k-60k |
-| 6b. Beam search baseline | Done at widths 100 and 1000 (Finding 6b-ii) |
+| 6b. Beam search baseline | Done at widths 100, 1000 and 10,000 (Findings 6b-ii, 8d) |
 | 7. Hybrid search and PDB-only IDA* | Done; IDA* evaluated in full (Finding 7d) |
 | 8. Evaluation | Done (Findings 8a-8d): the database helps at equal width; a wider beam wins at equal time |
+| Cache study (proposal's memoization question) | Done on CPU; GPU-side saving not measured |
+| Why the database helps (pass-by-pass analysis) | Done at width 100 (Finding 8e): mostly repeated attempts, plus a smaller pruning effect |
+| Findings cleanup | Done: summary at top, superseded sections marked, limitations and gaps stated |
 | Write-up | Yours; figures in `figures/`, tables in `notebooks/02_comparison.ipynb` |
-| Cache study (proposal's memoization question) | Done; GPU saving to measure after training |
 
-Test suite: 191 tests.
+Test suite: 192 tests.
