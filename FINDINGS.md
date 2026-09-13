@@ -1065,7 +1065,49 @@ both solved every cube):
   tight bound leaves fewer surviving children than the beam's width, so fewer network
   evaluations are needed; untested.
 
-### Cost against reach, and the question left open
+### Finding 8d: at the higher budget too, a wider beam does better
+
+Width 10,000 was **not in the original protocol**. It was added after Finding 8c left
+the equal-time question open at the higher budget, because beam search at width
+10,000 costs about as much per cube as the width-1000 hybrid. Same network, same
+1,050 cubes, same 30-move budget.
+
+Beam search at width 10,000 against the hybrid at width 1000, paired on the same
+cubes (at depths 1-11 both solved every cube):
+
+| Depth | Both solved | Beam only | Hybrid only | Neither | Beam ms/cube | Hybrid ms/cube |
+|---|---|---|---|---|---|---|
+| 12 | 48 | 0 | 1 | 1 | 1,021.9 | 322.4 |
+| 13 | 49 | 1 | 0 | 0 | 1,008.4 | 447.8 |
+| 14 | 45 | 3 | 0 | 2 | 1,372.3 | 1,268.7 |
+| 15 | 38 | 6 | 1 | 5 | 1,892.5 | 2,476.6 |
+| 16 | 41 | 2 | 2 | 5 | 1,808.0 | 2,155.6 |
+| 17 | 23 | 10 | 5 | 12 | 2,807.3 | 4,828.9 |
+| 18 | 33 | 5 | 3 | 9 | 2,487.2 | 3,775.6 |
+| 19 | 28 | 14 | 2 | 6 | 2,689.7 | 4,949.8 |
+| 20 | 25 | 8 | 5 | 12 | 3,065.2 | 5,616.9 |
+| 50 | 11 | 15 | 2 | 22 | 3,919.9 | 7,346.8 |
+
+- **The wider beam solved 64 cubes the hybrid did not; the hybrid solved 21 the wider
+  beam did not** (exact McNemar p = 3.3 x 10^-6) -- in less total time (25.1 s against
+  33.5 s, summing per-cube means over the 21 depths).
+- **The gap is largest on fully scrambled cubes:** 26 of 50 (52%) against 13 (26%).
+- **Solutions were slightly shorter, not longer:** on the 891 cubes both solved, the
+  wider beam's solution was shorter on 41 and longer on 14 (0.15 moves shorter on
+  average). Where IDA\* could check, it matched the optimum on 100% of 692 cubes after
+  rounding (mean 0.02 extra moves, worst case 10).
+- **The time profile differs with depth.** On easy cubes the hybrid is far cheaper
+  (depth 8: 17.5 ms against 419 ms), since pruning keeps its beam small; from depth 15
+  onward the wider beam is both cheaper and more successful.
+
+**The reason given for running this experiment was wrong.** Finding 8c argued the
+answer might flip because widening from 100 to 1000 added 21.8 points for the hybrid
+but only 12.8 for beam search. The next tenfold widening added 22.2 points for beam
+search (63.6% to 85.8%, depths 11-20). Beam search's gains had not slowed; its step
+from 100 to 1000 was simply the smaller of its two steps. Two points were not a trend
+-- worth a line in the report, since the experiment was chosen on that argument.
+
+### Cost against reach (final)
 
 Pooled over depths 11-20 (500 cubes per solver). This range was chosen after seeing
 the data, as where the search solvers are not all at 100%.
@@ -1075,33 +1117,33 @@ the data, as where the search solvers are not all at 100%.
 | Greedy | 19.0% | 0.4 ms |
 | Beam search, width 100 | 50.8% | 28.9 ms |
 | Beam search, width 1000 | 63.6% | 204 ms |
+| Beam search, width 10,000 | **85.8%** | 1,899 ms |
 | Hybrid, width 100 | 58.0% | 394 ms |
 | Hybrid, width 1000 | 79.8% | 2,598 ms |
 | IDA\*, 200k-node limit | 38.8% | 6,961 ms |
 
-- **At a budget of roughly 200-400 ms, the wider beam wins** (Finding 8b): beam search
-  at width 1000 solves more than the hybrid at width 100, in about half the time.
-- **At a budget of roughly 2.6 s, the equal-time question is open**, because no
-  beam-only configuration that expensive was run. There is a concrete reason to think
-  the answer could flip: going from width 100 to 1000 added 12.8 points for beam
-  search but 21.8 points for the hybrid, for similar increases in time (7.1x and
-  6.6x). The database's contribution grows with width. Beam search at width 10,000,
-  which would cost about as much as the width-1000 hybrid, is the experiment that
-  would settle it.
+- **At both budgets tested, beam search reaches further for the same or less time:**
+  width 1000 over hybrid width 100 at roughly 0.2-0.4 s per cube, and width 10,000 over
+  hybrid width 1000 at roughly 2-3 s.
 - **IDA\* with the corner database is out-reached by every search configuration from
   beam width 100 upward**, at a small fraction of its time -- within the limits already
   noted for its 200,000-node budget.
 
 **Taken together, the answer to the proposal's main question:**
 
-1. **Yes, the pattern database improves the learned solver**, at both widths tested:
-   significantly more cubes solved (38 to 0 and 91 to 0), never a longer solution,
-   and at width 1000 optimal on every cube where optimality could be checked.
-2. **In this implementation it is expensive** -- about 12-13 times the time of beam
-   search at the same width -- and at the lower budget tested, that time is better
-   spent on a wider beam.
-3. **Whether that still holds at a higher budget is unresolved**, and the widening gap
-   between the two solver families suggests it may not.
+1. **The pattern database does improve the learned solver at a fixed search width:**
+   significantly more cubes solved (38 to 0 at width 100, 91 to 0 at width 1000), and
+   never a longer solution.
+2. **But for the same time, a wider beam does better, at both budgets tested** (40 to
+   10 and 64 to 21, both significant, each in less total time and with slightly shorter
+   solutions). In this implementation, compute is better spent on search width than on
+   the corner pattern database.
+3. **This is a conclusion about this hybrid, not about pattern databases in general.**
+   The hybrid's cost comes mostly from restarting its search under a longer bound after
+   each failed pass, and the database covers corners only. At width 1000 the hybrid took
+   only about a third more total time than the wider beam (33.5 s against 25.1 s), so a
+   cheaper hybrid or a stronger database is exactly what could change the answer -- the
+   natural future work.
 
 ## Scope decisions against the proposal
 
@@ -1280,7 +1322,7 @@ network being evaluated was trained exactly as before.
 | 6a. Greedy baseline, measured against ground truth | Done on every 10k snapshot, 20k-60k |
 | 6b. Beam search baseline | Done at widths 100 and 1000 (Finding 6b-ii) |
 | 7. Hybrid search and PDB-only IDA* | Done; IDA* evaluated in full (Finding 7d) |
-| 8. Evaluation | Done (Findings 8a-8c); the equal-time question at the higher budget is left open |
+| 8. Evaluation | Done (Findings 8a-8d): the database helps at equal width; a wider beam wins at equal time |
 | Write-up | Yours; figures in `figures/`, tables in `notebooks/02_comparison.ipynb` |
 | Cache study (proposal's memoization question) | Done; GPU saving to measure after training |
 
