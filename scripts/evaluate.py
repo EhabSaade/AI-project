@@ -31,7 +31,11 @@ Reading the output:
 - Corner progress (greedy only) is whether the top move reduces the exact
   corner distance. It is one-sided: corners are a relaxation of the whole
   cube, so a move that is optimal overall need not reduce it.
-- Nodes (IDA* only) is the mean number of nodes expanded per cube.
+- Nodes is the mean number of nodes expanded per cube: states whose children
+  were generated. For IDA* that is its search calls; for the network solvers,
+  the states the network scored, including every failed hybrid pass.
+  (Files written before node counting was added leave the column empty for
+  the network solvers; --output-subdir reruns them without overwriting.)
 """
 
 import argparse
@@ -50,6 +54,7 @@ from rubiks.cube import ALL_MOVES, solved_state
 from rubiks.network import CubeNet, default_device
 from rubiks.pattern_db import lookup_batch
 from rubiks.solvers import (
+    CountingPolicy,
     beam_search,
     greedy,
     hybrid_search,
@@ -75,6 +80,8 @@ def parse_args():
     parser.add_argument("--max-depth", type=int, default=12)
     parser.add_argument("--budget", type=int, default=30)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--output-subdir", type=str, default="",
+                        help="write under runs/<run>/<subdir> instead of runs/<run>")
     return parser.parse_args()
 
 
@@ -105,21 +112,30 @@ def solver_label(args):
 
 
 def solve_all(args, policy, heuristic, states):
-    """Solution length per cube (-1 if unsolved), and IDA* nodes if applicable."""
+    """Solution length (-1 if unsolved) and nodes expanded, per cube."""
     if args.solver == "greedy":
-        return greedy(policy, states, args.budget), None
+        counted = CountingPolicy(policy)
+        lengths = greedy(counted, states, args.budget)
+        # Greedy is batched across cubes, so its count is a total: one node per
+        # move played, and an unsolved cube plays the whole budget.
+        nodes = np.where(lengths >= 0, lengths, args.budget)
+        assert nodes.sum() == counted.expanded, "greedy node count does not add up"
+        return lengths, nodes
 
     lengths, nodes = [], []
     for state in states:
-        if args.solver == "beam":
-            path = beam_search(policy, state, args.width, args.budget)
-        elif args.solver == "hybrid":
-            path = hybrid_search(policy, heuristic, state, args.width, args.budget)
-        else:
+        if args.solver == "ida":
             path, expanded = ida_star(heuristic, state, args.budget, args.node_limit)
-            nodes.append(expanded)
+        else:
+            counted = CountingPolicy(policy)
+            if args.solver == "beam":
+                path = beam_search(counted, state, args.width, args.budget)
+            else:
+                path = hybrid_search(counted, heuristic, state, args.width, args.budget)
+            expanded = counted.expanded
+        nodes.append(expanded)
         lengths.append(-1 if path is None else len(path))
-    return np.array(lengths), (np.array(nodes) if nodes else None)
+    return np.array(lengths), np.array(nodes)
 
 
 def corner_progress(policy, states, pdb):
@@ -154,7 +170,7 @@ def main():
     label = solver_label(args)
     suffix = f"_{Path(args.checkpoint).stem}" if policy is not None else ""
     stem = f"eval_{label}{suffix}_d{args.min_depth}-{args.max_depth}"
-    output_dir = ROOT / "runs" / args.run
+    output_dir = ROOT / "runs" / args.run / args.output_subdir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if policy is not None:
@@ -181,7 +197,7 @@ def main():
         progress = (
             corner_progress(policy, states, pdb) if args.solver == "greedy" else float("nan")
         )
-        mean_nodes = float(nodes.mean()) if nodes is not None else float("nan")
+        mean_nodes = float(nodes.mean())
 
         print(
             f"{depth:>5} {solve_rate:>7.0%} {text(median, '.0f'):>11} "
@@ -190,8 +206,7 @@ def main():
         )
         summary_rows.append([depth, solve_rate, median, progress, mean_nodes, ms_per_cube])
         for cube, length in enumerate(lengths):
-            cube_nodes = int(nodes[cube]) if nodes is not None else ""
-            cube_rows.append([depth, cube, int(length), cube_nodes])
+            cube_rows.append([depth, cube, int(length), int(nodes[cube])])
 
     summary_path = output_dir / f"{stem}.csv"
     cubes_path = output_dir / f"{stem}_cubes.csv"

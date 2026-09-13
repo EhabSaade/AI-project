@@ -6,6 +6,7 @@ torch = pytest.importorskip("torch")
 from rubiks.cube import ALL_MOVES, apply_move, apply_sequence, is_solved, solved_state
 from rubiks.network import CubeNet
 from rubiks.solvers import (
+    CountingPolicy,
     beam_search,
     greedy,
     hybrid_search,
@@ -249,6 +250,59 @@ def test_hybrid_is_the_first_single_pass_that_succeeds():
 
 def test_hybrid_on_a_solved_cube_returns_an_empty_path():
     assert hybrid_search(uniform_policy, zero_heuristic, solved_state(), width=2, budget=5) == []
+
+
+# --- nodes expanded -----------------------------------------------------------
+
+
+def test_greedy_expands_one_node_per_move_played():
+    rng = np.random.default_rng(14)
+    for depth in range(1, 7):
+        moves, state = scrambled(rng, depth)
+        counted = CountingPolicy(path_oracle(moves))
+        assert greedy(counted, state[None, :], budget=20).tolist() == [depth]
+        assert counted.expanded == depth
+
+
+def test_beam_expands_every_state_in_the_beam_at_each_step():
+    """Width 4, budget 2, no solution: the root, then a full beam of 4."""
+    _, state = scrambled(np.random.default_rng(6), 10)
+    counted = CountingPolicy(uniform_policy)
+    assert beam_search(counted, state, width=4, budget=2) is None
+    assert counted.expanded == 1 + 4
+
+
+def test_nothing_is_expanded_for_a_solved_cube():
+    counted = CountingPolicy(uniform_policy)
+    beam_search(counted, solved_state(), width=3, budget=5)
+    hybrid_search(counted, zero_heuristic, solved_state(), width=3, budget=5)
+    assert counted.expanded == 0
+
+
+def test_hybrid_nodes_are_the_sum_over_its_passes():
+    """Failed passes are real work, so they count."""
+    rng = np.random.default_rng(15)
+    for depth in range(2, 7):
+        moves, state = scrambled(rng, depth)
+        policy = path_oracle(moves, distractor=True)
+        exact = path_heuristic(moves)
+
+        def loose(states):
+            return np.maximum(exact(states) - 2, 0)
+
+        per_pass = 0
+        start = max(int(loose(state[None, :])[0]), 1)
+        for bound in range(start, 16):
+            counted = CountingPolicy(policy)
+            path = beam_search(counted, state, 2, bound, loose, bound)
+            per_pass += counted.expanded
+            if path is not None:
+                break
+
+        counted = CountingPolicy(policy)
+        hybrid_search(counted, loose, state, width=2, budget=15)
+        assert counted.expanded == per_pass
+        assert counted.expanded > depth  # the early passes failed and still cost
 
 
 # --- IDA* ---------------------------------------------------------------------

@@ -59,6 +59,24 @@ def network_policy(model: torch.nn.Module, device: torch.device, batch_size: int
     return policy
 
 
+class CountingPolicy:
+    """A policy that counts the states it scores.
+
+    Every network-driven solver runs its policy exactly once on each state it
+    expands, so `expanded` is the number of nodes expanded: states whose
+    children were generated, the same quantity `ida_star` reports. The solvers
+    themselves are unchanged by counting.
+    """
+
+    def __init__(self, policy: Policy):
+        self.policy = policy
+        self.expanded = 0
+
+    def __call__(self, states: np.ndarray) -> np.ndarray:
+        self.expanded += states.shape[0]
+        return self.policy(states)
+
+
 def pdb_heuristic(distances: np.ndarray) -> Heuristic:
     def heuristic(states: np.ndarray) -> np.ndarray:
         return lookup_batch(distances, states).astype(np.int64)

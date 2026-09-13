@@ -9,7 +9,8 @@
   where the final numbers are.
 - **Final results live in:** Finding 3c (engine validation), 4c (pattern database),
   T1 final (training length), 6b-ii (beam search), 7c and 7d (IDA\* and scramble
-  depth), 8a-8d (the main question), 8e (why the database helps), C1-C3 (cache study).
+  depth), 8a-8d (the main question), 8e (why the database helps), 8f (nodes expanded),
+  C1-C3 (cache study).
 - **All final solver results share one setup:** the final 60k-iteration network;
   50 cubes per depth at depths 1-20 and 50 (1,050 cubes); identical cubes for every
   solver; a 30-move budget. `notebooks/02_comparison.ipynb` reprints every table.
@@ -30,19 +31,22 @@ solver finished:
 | Similar time: beam width 1000 vs hybrid width 100 | **40** | 10 | 2.4 x 10^-5 | 2.6 s vs 4.8 s |
 | Similar time: beam width 10,000 vs hybrid width 1000 | **64** | 21 | 3.3 x 10^-6 | 25.1 s vs 33.5 s |
 
-Cubes solved at depths 11-20 (500 cubes each) against mean time per cube:
+Cubes solved at depths 11-20 (500 cubes each) against mean time and mean nodes
+expanded per cube (Finding 8f):
 
 | Solver | Greedy | Beam 100 | Beam 1000 | Beam 10,000 | Hybrid 100 | Hybrid 1000 | IDA\* |
 |---|---|---|---|---|---|---|---|
 | Cubes solved | 19.0% | 50.8% | 63.6% | **85.8%** | 58.0% | 79.8% | 38.8% |
 | Mean time per cube | 0.4 ms | 29 ms | 204 ms | 1,899 ms | 394 ms | 2,598 ms | 6,961 ms |
+| Mean nodes expanded per cube | 26 | 1,801 | 15,122 | 114,948 | 18,320 | 113,442 | 133,331 |
 
 **Answer:**
 
 1. **At the same search width, the pattern database significantly improves the
    learned solver**, and never produced a longer solution.
 2. **For the same time, a wider beam does better, at both budgets tested**, using less
-   total time and giving slightly shorter solutions.
+   total time and giving slightly shorter solutions. The same holds at roughly equal
+   nodes expanded, which do not depend on how fast the code runs (Finding 8f).
 3. **Most of the gain comes from repeated attempts, not from pruning.** Roughly 60-70%
    of the hybrid's gain at width 100 needs its many differently-pruned passes -- a median
    of 23 per hard cube -- which is also what makes it expensive: no single bound recovers
@@ -73,6 +77,10 @@ Cubes solved at depths 11-20 (500 cubes each) against mean time per cube:
 - **Caching:** with ordinary independent scrambles, 35.9% of the positions evaluated
   per training batch are duplicates; correlated scrambles add only 3 more points
   (Findings C1-C2).
+- **Nodes expanded:** the hybrid expands far fewer nodes than beam search on a typical
+  cube it solves (median 67 against 419 at width 100), but 9.5 times as many over all
+  1,050 cubes, because a cube it fails costs every pass up to bound 30: 90% of its nodes
+  go to cubes it never solves (Finding 8f).
 
 ### Limitations that apply to the results above
 
@@ -85,7 +93,9 @@ Cubes solved at depths 11-20 (500 cubes each) against mean time per cube:
 3. **Timings depend on implementation.** IDA\* is single-threaded Python on the CPU;
    beam search and the hybrid evaluate the network in batches on the GPU. Comparisons
    between IDA\*'s times and the others' reflect implementation as much as algorithm.
-   Some timing runs overlapped other work on the same laptop.
+   Some timing runs overlapped other work on the same laptop. Node counts (Finding 8f)
+   do not depend on the implementation and give the same equal-time answer, but a node
+   is not the same amount of work for every solver.
 4. **50 cubes per depth.** The pooled paired tests are strong; differences of a few
    points at a single depth are one or two cubes and should be read as noise.
 5. **Choices made after seeing the data** are declared where they occur: the depth
@@ -1315,6 +1325,88 @@ pruning effect is clear (11 gained, 0 lost), its size is not.
 cubes solved compared with beam search, over all 1,050 cubes, against the full hybrid's
 +38; the right panel shows how many bounds solve each of the 38 cubes.
 
+### Finding 8f: nodes expanded -- the hybrid is cheap when it succeeds and expensive when it fails
+
+**Measured:** nodes expanded per cube for every solver, the search-effort measure of
+the proposal's Evaluation #2, on the same 1,050 cubes as Findings 8a-8e.
+
+**Definition, the same for every solver:** a node expanded is a state whose children
+were generated. IDA\* counts its search calls. The network solvers run the network
+exactly once on each state they expand, so `solvers.CountingPolicy` counts the states
+the network scores. Tests check the count for greedy (one node per move played), beam
+search (every state in the beam at every step) and the hybrid (the sum over its passes,
+failed passes included). Per-cube counts are in `runs/adi_d12/nodes/`, and
+`notebooks/02_comparison.ipynb` asserts that they come from the same searches: every
+cube's result matches the evaluated one.
+
+All 1,050 cubes:
+
+| Solver | Cubes solved | Total nodes | Nodes per solve | Mean nodes, solved cubes | Mean nodes, unsolved cubes | Share of nodes spent on unsolved cubes |
+|---|---|---|---|---|---|---|
+| Greedy | 560 | 17,328 | 31 | 5 | 30 | 85% |
+| Beam 100 | 753 | 1,177,624 | 1,564 | 452 | 2,819 | 71% |
+| Beam 1000 | 821 | 9,907,254 | 12,067 | 4,458 | 27,281 | 63% |
+| Beam 10,000 | 955 | 76,394,954 | 79,995 | 53,755 | 263,783 | 33% |
+| Hybrid 100 | 791 | 11,187,383 | 14,143 | 1,475 | 38,690 | 90% |
+| Hybrid 1000 | 912 | 73,553,322 | 80,651 | 25,945 | 361,535 | 68% |
+| IDA\* (200,000-node limit) | 693 | 77,818,067 | 112,292 | 9,261 | 200,001 | 92% |
+
+*Nodes per solve* is all nodes expanded, failures included, divided by cubes solved. An
+IDA\* cube that hits the node limit is recorded at 200,001.
+
+Paired, on cubes both solvers solved (cubes already solved at the start excluded):
+
+| First vs second | Cubes | Median nodes | Total nodes | Second used fewer / more / same |
+|---|---|---|---|---|
+| Beam 100 vs hybrid 100 | 749 | 419 vs 67 | 340,381 vs 740,739 | 418 / 256 / 75 |
+| Beam 1000 vs hybrid 1000 | 817 | 3,281 vs 155 | 3,659,905 vs 8,999,699 | 506 / 236 / 75 |
+| Beam 1000 vs hybrid 100 | 777 | 3,281 vs 92 | 3,063,665 vs 961,243 | 689 / 13 / 75 |
+| Beam 10,000 vs hybrid 1000 | 887 | 33,783 vs 266 | 39,363,457 vs 19,101,380 | 774 / 38 / 75 |
+| IDA\* vs hybrid 100 | 679 | 24 vs 42 | 5,740,592 vs 334,137 | 160 / 318 / 201 |
+
+Time per 1,000 nodes at depths 11-20, from the original timings: greedy 17.1 ms, beam
+search 13.5-16.5 ms, hybrid 21.5-22.9 ms, IDA\* 52.2 ms.
+
+- **On a typical cube it solves, the hybrid expands far fewer nodes than beam search.**
+  Median 67 against 419 at width 100, and 155 against 3,281 at width 1000. A tight bound
+  prunes most children, so the hybrid's beam stays small, while beam search fills its
+  whole beam within a few moves. This part of the proposal's expectation holds.
+- **In total, it expands far more.** Over all 1,050 cubes the hybrid expands 9.5 times as
+  many nodes as beam search at width 100 and 7.4 times as many at width 1000. Each of its
+  nodes also costs more time, because every child is looked up in the database (about
+  22 against 14-16 ms per 1,000 nodes). Together these match its roughly twelvefold time
+  cost in Findings 8a and 8c.
+- **The cost is in failures.** A cube the hybrid cannot solve runs every pass up to
+  bound 30: 38,690 nodes on average at width 100, against 1,475 for a cube it solves, and
+  90% of all its nodes go to cubes it never solves. Even on cubes both solve, its total
+  is higher (740,739 against 340,381 at width 100), because a hard cube needs many
+  passes. This is Finding 8e seen in nodes.
+- **The equal-time result also holds at roughly equal nodes, which do not depend on how
+  fast the code runs.** Beam width 1000 expanded 11% fewer nodes than hybrid width 100
+  (9,907,254 against 11,187,383) and solved 821 cubes against 791. Beam width 10,000
+  expanded 4% more than hybrid width 1000 (76,394,954 against 73,553,322) and solved 955
+  against 912, at almost the same nodes per solve (79,995 against 80,651). The paired
+  tests are those of Findings 8b and 8d (40 to 10 and 64 to 21). A hybrid node does more
+  work than a beam search node, so counting nodes if anything flatters the hybrid.
+- **IDA\* against the hybrid:** on cubes both solved, IDA\* expands fewer nodes on a
+  typical cube (median 24 against 42) but 17 times as many in total (5,740,592 against
+  334,137), all on the harder cubes. Each IDA\* node also takes about 2.4 times as long,
+  which reflects its Python recursion on the CPU rather than the algorithm.
+
+**Against the proposal's expected outcome** ("expand fewer nodes and/or find shorter
+solutions than the network-only search at equivalent compute"): the hybrid does expand
+fewer nodes on most cubes it solves, but at equivalent compute, measured in time or in
+nodes, a wider beam solves more cubes.
+
+**Figure:** `figures/cost_versus_reach.png` plots cubes solved at depths 11-20 against
+mean time per cube (left) and mean nodes expanded per cube (right). In the right panel
+beam search at width 10,000 sits almost directly above the hybrid at width 1000: the
+same nodes, more cubes solved.
+
+**Caveats:** the equal-time pairs were chosen by time (Findings 8b, 8d), not matched on
+nodes; they happen to be close in nodes too. A node is not the same amount of work for
+every solver. Totals include the 50 depth-50 cubes.
+
 **Taken together, the answer to the proposal's main question:**
 
 1. **The pattern database does improve the learned solver at a fixed search width:**
@@ -1322,8 +1414,8 @@ cubes solved compared with beam search, over all 1,050 cubes, against the full h
    never a longer solution.
 2. **But for the same time, a wider beam does better, at both budgets tested** (40 to
    10 and 64 to 21, both significant, each in less total time and with slightly shorter
-   solutions). In this implementation, compute is better spent on search width than on
-   the corner pattern database.
+   solutions). Counting nodes expanded instead of time gives the same answer (Finding
+   8f), so compute is better spent on search width than on the corner pattern database.
 3. **Why: most of the gain comes from repeated attempts, not from pruning** (Finding
    8e). Roughly 60-70% of it needs the hybrid's many differently-pruned passes, which is
    what makes it expensive; a genuine pruning effect accounts for the rest. The best
@@ -1516,7 +1608,8 @@ network being evaluated was trained exactly as before.
 | 8. Evaluation | Done (Findings 8a-8d): the database helps at equal width; a wider beam wins at equal time |
 | Cache study (proposal's memoization question) | Done on CPU; GPU-side saving not measured |
 | Why the database helps (pass-by-pass analysis) | Done at width 100 (Finding 8e): mostly repeated attempts, plus a smaller pruning effect |
+| Nodes expanded (proposal Evaluation #2) | Done for every solver (Finding 8f): the hybrid is cheap when it succeeds, expensive when it fails |
 | Findings cleanup | Done: summary at top, superseded sections marked, limitations and gaps stated |
 | Write-up | Yours; figures in `figures/`, tables in `notebooks/02_comparison.ipynb` |
 
-Test suite: 192 tests.
+Test suite: 196 tests.
